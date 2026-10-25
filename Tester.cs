@@ -6,6 +6,7 @@ public class TextManagerTester : MonoBehaviour
     public TextManager manager;
     public TMP_Text target;
     public WritingStyle style;
+    public IdleStyle idleStyle;
     [TextArea(2, 6)] public string message = "Hello there. This is a <link=\"test\">clickable link</link>! Does it work?";
 
     void OnEnable()
@@ -42,13 +43,19 @@ public class TextManagerTester : MonoBehaviour
     [ContextMenu("Write")]
     public void Write()
     {
-        manager.Write(message, target, style);
+        manager.Write(message, target, style, idleStyle);
     }
 
     [ContextMenu("Erase")]
     public void Erase()
     {
         manager.Erase(target, style);
+    }
+
+    [ContextMenu("Stop Idle")]
+    public void StopIdle()
+    {
+        manager.StopIdle();
     }
 
     [ContextMenu("Skip")]

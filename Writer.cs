@@ -19,6 +19,7 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
     WritingStyle lastStyle = null;
     int hoveredLinkIndex = -1;
     Coroutine current;
+    Coroutine idleRoutine;
     bool currentErasing;
     bool skipRequested;
     readonly TextRenderState renderState = new TextRenderState();
@@ -26,9 +27,10 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
 #region public
 
     public bool IsBusy => current != null;
+    public bool IsIdling => idleRoutine != null;
     public string TargetMessage => targetMessage;
 
-    public void Write(string message, TMP_Text writeOn, WritingStyle style)
+    public void Write(string message, TMP_Text writeOn, WritingStyle style, IdleStyle idle = null)
     {
         if (writeOn == null || style == null)
         {
@@ -45,7 +47,9 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
         writeOn.text = message;
         writeOn.ForceMeshUpdate(true, true);
 
-        current = StartCoroutine(Run(writeOn, style, false));
+        if (idle == null) idle = style as IdleStyle;
+
+        current = StartCoroutine(Run(writeOn, style, false, idle));
     }
 
     public void Erase(TMP_Text eraseOn, WritingStyle style = null)
@@ -67,7 +71,36 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
         Bind(eraseOn);
         eraseOn.ForceMeshUpdate(true, true);
 
-        current = StartCoroutine(Run(eraseOn, toUse, true));
+        current = StartCoroutine(Run(eraseOn, toUse, true, null));
+    }
+
+    public void Idle(TMP_Text target, IdleStyle style)
+    {
+        if (target == null || style == null)
+        {
+            Debug.LogError("idle needs a text and a style");
+            return;
+        }
+
+        if (current != null)
+        {
+            Debug.LogWarning("cannot idle while writing or erasing");
+            return;
+        }
+
+        StopIdle();
+        Bind(target);
+        StartIdle(target, style);
+    }
+
+    public void StopIdle()
+    {
+        if (idleRoutine == null) return;
+
+        StopCoroutine(idleRoutine);
+        idleRoutine = null;
+
+        if (text != null) text.ForceMeshUpdate(true, true);
     }
 
     public void Skip()
@@ -87,6 +120,8 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
 
     void CancelCurrent()
     {
+        StopIdle();
+
         if (current == null) return;
 
         StopCoroutine(current);
@@ -107,7 +142,37 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
         else onWritingEnd?.Invoke();
     }
 
-    IEnumerator Run(TMP_Text target, WritingStyle style, bool erasing)
+    void StartIdle(TMP_Text target, IdleStyle style)
+    {
+        target.ForceMeshUpdate(true, true);
+        idleRoutine = StartCoroutine(RunIdle(target, style));
+    }
+
+    IEnumerator RunIdle(TMP_Text target, IdleStyle style)
+    {
+        renderState.Capture(target);
+
+        List<TextElement> elements = BuildElements(target.textInfo, style.elementType);
+        if (style.randomChars) Shuffle(elements);
+
+        float delay = Mathf.Max(style.delayBetweenElements, 0f);
+        float elapsed = 0f;
+
+        while (true)
+        {
+            for (int i = 0; i < elements.Count; i++)
+            {
+                style.ApplyIdle(renderState, elements[i], Mathf.Max(elapsed - i * delay, 0f));
+            }
+
+            renderState.Flush();
+
+            yield return null;
+            elapsed += useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
+        }
+    }
+
+    IEnumerator Run(TMP_Text target, WritingStyle style, bool erasing, IdleStyle idle)
     {
         currentErasing = erasing;
         skipRequested = false;
@@ -145,6 +210,9 @@ public class TextManager : MonoBehaviour, IPointerClickHandler, IPointerMoveHand
 
         current = null;
         skipRequested = false;
+
+        if (!erasing && idle != null) StartIdle(target, idle);
+
         RaiseEnd(erasing);
     }
 
